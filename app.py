@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import re
 
+st.set_page_config(page_title="Analizador WhatsApp Movizzon", layout="wide")
+
 st.title("Analizador de TXT WhatsApp - Movizzon")
 
 archivo = st.file_uploader("Selecciona archivo TXT", type=["txt"])
@@ -15,7 +17,6 @@ if archivo:
     texto = archivo.read().decode("utf-8", errors="ignore")
 
     patron = r"\[(\d{1,2}[-/]\d{1,2}[-/]\d{2}),\s([^]]+?)\]\s(.+?):\s(.*?)(?=\n\[\d{1,2}[-/]\d{1,2}[-/]\d{2},|\Z)"
-
     matches = re.findall(patron, texto, flags=re.DOTALL)
 
     filas = []
@@ -38,22 +39,105 @@ if archivo:
 
     df = pd.DataFrame(filas)
 
-    st.write("Mensajes detectados:", len(df))
+    df["fecha_dt"] = pd.to_datetime(df["fecha"], format="%d-%m-%y", errors="coerce")
 
-    if len(df) == 0:
-        st.error("No se detectaron mensajes. Mostrando primeras líneas del TXT para ajustar formato:")
-        st.code(texto[:2000])
-    else:
-        df_robot = df[df["robot"] == True]
+    df_alertas = df[
+        (df["aplicacion"] != "") |
+        (df["paso"] != "") |
+        (df["operadores"] != "")
+    ].copy()
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Mensajes", len(df))
-        c2.metric("Alertas robot", len(df_robot))
-        c3.metric("Apps", df_robot["aplicacion"].nunique())
-        c4.metric("Pasos", df_robot["paso"].nunique())
+    st.subheader("Filtros")
 
-        st.subheader("Detalle completo")
-        st.dataframe(df, use_container_width=True)
+    colf1, colf2, colf3, colf4 = st.columns(4)
+
+    fecha_min = df_alertas["fecha_dt"].min()
+    fecha_max = df_alertas["fecha_dt"].max()
+
+    rango_fechas = colf1.date_input(
+        "Rango de fechas",
+        value=(fecha_min, fecha_max)
+    )
+
+    apps = sorted(df_alertas["aplicacion"].dropna().unique())
+    apps = [x for x in apps if x != ""]
+
+    pasos = sorted(df_alertas["paso"].dropna().unique())
+    pasos = [x for x in pasos if x != ""]
+
+    operadores = sorted(df_alertas["operadores"].dropna().unique())
+    operadores = [x for x in operadores if x != ""]
+
+    app_sel = colf2.multiselect("Aplicación", apps)
+    paso_sel = colf3.multiselect("Paso", pasos)
+    operador_sel = colf4.multiselect("Operadores", operadores)
+
+    df_filtrado = df_alertas.copy()
+
+    if len(rango_fechas) == 2:
+        inicio = pd.to_datetime(rango_fechas[0])
+        fin = pd.to_datetime(rango_fechas[1])
+        df_filtrado = df_filtrado[
+            (df_filtrado["fecha_dt"] >= inicio) &
+            (df_filtrado["fecha_dt"] <= fin)
+        ]
+
+    if app_sel:
+        df_filtrado = df_filtrado[df_filtrado["aplicacion"].isin(app_sel)]
+
+    if paso_sel:
+        df_filtrado = df_filtrado[df_filtrado["paso"].isin(paso_sel)]
+
+    if operador_sel:
+        df_filtrado = df_filtrado[df_filtrado["operadores"].isin(operador_sel)]
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    c1.metric("Mensajes totales", len(df))
+    c2.metric("Alertas filtradas", len(df_filtrado))
+    c3.metric("Apps afectadas", df_filtrado["aplicacion"].nunique())
+    c4.metric("Pasos afectados", df_filtrado["paso"].nunique())
+
+    st.subheader("Top aplicaciones")
+
+    top_apps = (
+        df_filtrado.groupby("aplicacion")
+        .size()
+        .reset_index(name="alertas")
+        .sort_values("alertas", ascending=False)
+    )
+
+    if len(top_apps) > 0:
+        st.bar_chart(top_apps.set_index("aplicacion"))
+
+    st.subheader("Tabla filtrada")
+
+    columnas_visibles = [
+        "fecha",
+        "hora",
+        "usuario",
+        "aplicacion",
+        "paso",
+        "operadores",
+        "mensaje_error",
+        "detalle"
+    ]
+
+    st.dataframe(
+        df_filtrado[columnas_visibles],
+        use_container_width=True,
+        hide_index=True
+    )
+
+    csv = df_filtrado[columnas_visibles].to_csv(index=False).encode("utf-8")
+
+    st.download_button(
+        "Descargar tabla filtrada CSV",
+        csv,
+        "analisis_whatsapp_filtrado.csv",
+        "text/csv"
+    )
 
 else:
     st.info("Sube un TXT")
+
