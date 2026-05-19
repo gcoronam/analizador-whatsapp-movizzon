@@ -2,11 +2,17 @@ import streamlit as st
 import pandas as pd
 import re
 
-st.set_page_config(page_title="Analizador WhatsApp Movizzon", layout="wide")
+st.set_page_config(
+    page_title="Analizador WhatsApp Movizzon",
+    layout="wide"
+)
 
 st.title("Analizador de TXT WhatsApp - Movizzon")
 
-archivo = st.file_uploader("Selecciona archivo TXT", type=["txt"])
+archivo = st.file_uploader(
+    "Selecciona archivo TXT",
+    type=["txt"]
+)
 
 def extraer_campo(texto, campo):
     patron = rf"\*{campo}:\*\s*(.*)"
@@ -14,14 +20,24 @@ def extraer_campo(texto, campo):
     return m.group(1).strip() if m else ""
 
 if archivo:
-    texto = archivo.read().decode("utf-8", errors="ignore")
+
+    texto = archivo.read().decode(
+        "utf-8",
+        errors="ignore"
+    )
 
     patron = r"\[(\d{1,2}[-/]\d{1,2}[-/]\d{2}),\s([^]]+?)\]\s(.+?):\s(.*?)(?=\n\[\d{1,2}[-/]\d{1,2}[-/]\d{2},|\Z)"
-    matches = re.findall(patron, texto, flags=re.DOTALL)
+
+    matches = re.findall(
+        patron,
+        texto,
+        flags=re.DOTALL
+    )
 
     filas = []
 
     for fecha, hora, usuario, mensaje in matches:
+
         mensaje = mensaje.strip()
 
         filas.append({
@@ -39,7 +55,11 @@ if archivo:
 
     df = pd.DataFrame(filas)
 
-    df["fecha_dt"] = pd.to_datetime(df["fecha"], format="%d-%m-%y", errors="coerce")
+    df["fecha_dt"] = pd.to_datetime(
+        df["fecha"],
+        format="%d-%m-%y",
+        errors="coerce"
+    )
 
     df_alertas = df[
         (df["aplicacion"] != "") |
@@ -59,14 +79,20 @@ if archivo:
         value=(fecha_min, fecha_max)
     )
 
-    apps = sorted(df_alertas["aplicacion"].dropna().unique())
-    apps = [x for x in apps if x != ""]
+    apps = sorted([
+        x for x in df_alertas["aplicacion"].dropna().unique()
+        if x != ""
+    ])
 
-    pasos = sorted(df_alertas["paso"].dropna().unique())
-    pasos = [x for x in pasos if x != ""]
+    pasos = sorted([
+        x for x in df_alertas["paso"].dropna().unique()
+        if x != ""
+    ])
 
-    operadores = sorted(df_alertas["operadores"].dropna().unique())
-    operadores = [x for x in operadores if x != ""]
+    operadores = sorted([
+        x for x in df_alertas["operadores"].dropna().unique()
+        if x != ""
+    ])
 
     app_sel = colf2.multiselect("Aplicación", apps)
     paso_sel = colf3.multiselect("Paso", pasos)
@@ -77,19 +103,26 @@ if archivo:
     if len(rango_fechas) == 2:
         inicio = pd.to_datetime(rango_fechas[0])
         fin = pd.to_datetime(rango_fechas[1])
+
         df_filtrado = df_filtrado[
             (df_filtrado["fecha_dt"] >= inicio) &
             (df_filtrado["fecha_dt"] <= fin)
         ]
 
     if app_sel:
-        df_filtrado = df_filtrado[df_filtrado["aplicacion"].isin(app_sel)]
+        df_filtrado = df_filtrado[
+            df_filtrado["aplicacion"].isin(app_sel)
+        ]
 
     if paso_sel:
-        df_filtrado = df_filtrado[df_filtrado["paso"].isin(paso_sel)]
+        df_filtrado = df_filtrado[
+            df_filtrado["paso"].isin(paso_sel)
+        ]
 
     if operador_sel:
-        df_filtrado = df_filtrado[df_filtrado["operadores"].isin(operador_sel)]
+        df_filtrado = df_filtrado[
+            df_filtrado["operadores"].isin(operador_sel)
+        ]
 
     c1, c2, c3, c4 = st.columns(4)
 
@@ -98,17 +131,92 @@ if archivo:
     c3.metric("Apps afectadas", df_filtrado["aplicacion"].nunique())
     c4.metric("Pasos afectados", df_filtrado["paso"].nunique())
 
-    st.subheader("Top aplicaciones")
+    st.subheader("Alertas por día")
 
-    top_apps = (
-        df_filtrado.groupby("aplicacion")
+    alertas_dia = (
+        df_filtrado
+        .groupby("fecha_dt")
+        .size()
+        .reset_index(name="alertas")
+        .sort_values("fecha_dt")
+    )
+
+    if len(alertas_dia) > 0:
+        st.line_chart(
+            alertas_dia.set_index("fecha_dt")
+        )
+
+    colg1, colg2 = st.columns(2)
+
+    with colg1:
+        st.subheader("Top aplicaciones")
+
+        top_apps = (
+            df_filtrado
+            .groupby("aplicacion")
+            .size()
+            .reset_index(name="alertas")
+            .sort_values("alertas", ascending=False)
+            .head(10)
+        )
+
+        if len(top_apps) > 0:
+            st.bar_chart(
+                top_apps.set_index("aplicacion")
+            )
+
+    with colg2:
+        st.subheader("Top pasos afectados")
+
+        top_pasos = (
+            df_filtrado
+            .groupby("paso")
+            .size()
+            .reset_index(name="alertas")
+            .sort_values("alertas", ascending=False)
+            .head(10)
+        )
+
+        if len(top_pasos) > 0:
+            st.bar_chart(
+                top_pasos.set_index("paso")
+            )
+
+    st.subheader("Matriz fecha vs aplicación")
+
+    matriz_fecha_app = pd.pivot_table(
+        df_filtrado,
+        index="fecha",
+        columns="aplicacion",
+        values="paso",
+        aggfunc="count",
+        fill_value=0
+    )
+
+    st.dataframe(
+        matriz_fecha_app,
+        use_container_width=True
+    )
+
+    st.subheader("Operadores afectados")
+
+    df_ops = df_filtrado.copy()
+    df_ops["operador_individual"] = df_ops["operadores"].str.split(",")
+    df_ops = df_ops.explode("operador_individual")
+    df_ops["operador_individual"] = df_ops["operador_individual"].str.strip()
+
+    top_ops = (
+        df_ops[df_ops["operador_individual"] != ""]
+        .groupby("operador_individual")
         .size()
         .reset_index(name="alertas")
         .sort_values("alertas", ascending=False)
     )
 
-    if len(top_apps) > 0:
-        st.bar_chart(top_apps.set_index("aplicacion"))
+    if len(top_ops) > 0:
+        st.bar_chart(
+            top_ops.set_index("operador_individual")
+        )
 
     st.subheader("Tabla filtrada")
 
@@ -129,7 +237,9 @@ if archivo:
         hide_index=True
     )
 
-    csv = df_filtrado[columnas_visibles].to_csv(index=False).encode("utf-8")
+    csv = df_filtrado[columnas_visibles].to_csv(
+        index=False
+    ).encode("utf-8")
 
     st.download_button(
         "Descargar tabla filtrada CSV",
@@ -140,4 +250,3 @@ if archivo:
 
 else:
     st.info("Sube un TXT")
-
