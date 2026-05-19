@@ -4,25 +4,37 @@ import re
 
 st.title("Analizador de TXT WhatsApp - Movizzon")
 
-archivo = st.file_uploader("Selecciona archivo TXT", type=["txt"])
+archivo = st.file_uploader(
+    "Selecciona archivo TXT",
+    type=["txt"]
+)
 
 if archivo:
 
-    texto = archivo.read().decode("utf-8")
-
-    patron = r"(\d{1,2}-\d{1,2}-\d{2}), (\d{1,2}:\d{1,2}:\d{1,2}) - (.*?): (.*)"
+    texto = archivo.read().decode(
+        "utf-8",
+        errors="ignore"
+    )
 
     datos=[]
 
     for linea in texto.split("\n"):
 
-        m = re.match(patron,linea)
+        patron = r"(\d{1,2}[-/]\d{1,2}[-/]\d{2}),\s(.+?)\s-\s(.+?):\s(.*)"
+
+        m=re.match(
+            patron,
+            linea
+        )
 
         if m:
 
-            fecha,hora,usuario,mensaje = m.groups()
+            fecha,hora,usuario,mensaje=m.groups()
 
-            robot = "Robot" in mensaje
+            robot=(
+                "Robot" in mensaje
+                or "~Robot" in mensaje
+            )
 
             datos.append([
                 fecha,
@@ -32,7 +44,7 @@ if archivo:
                 robot
             ])
 
-    df = pd.DataFrame(
+    df=pd.DataFrame(
         datos,
         columns=[
             "fecha",
@@ -43,7 +55,7 @@ if archivo:
         ]
     )
 
-    c1,c2,c3 = st.columns(3)
+    c1,c2,c3=st.columns(3)
 
     c1.metric(
         "Mensajes",
