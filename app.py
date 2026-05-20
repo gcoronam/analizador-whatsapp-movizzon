@@ -3,45 +3,33 @@ import pandas as pd
 import re
 import plotly.express as px
 
-st.set_page_config(
-    page_title="Analizador WhatsApp Movizzon",
-    layout="wide"
-)
+st.set_page_config(page_title="Analizador WhatsApp Movizzon", layout="wide")
 
 st.title("Analizador de TXT WhatsApp - Movizzon")
 
-archivo = st.file_uploader(
-    "Selecciona archivo TXT",
-    type=["txt"]
-)
+archivo = st.file_uploader("Selecciona archivo TXT", type=["txt"])
 
 
-def extraer_campo(texto, campo):
+def extraer_campo(texto, campos):
+    if isinstance(campos, str):
+        campos = [campos]
 
-    patron = rf"\*{campo}:\*\s*(.*)"
+    for campo in campos:
+        patron = rf"\*?{campo}\*?:\s*(.*)"
+        m = re.search(patron, texto, flags=re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
 
-    m = re.search(
-        patron,
-        texto
-    )
-
-    return m.group(1).strip() if m else ""
+    return ""
 
 
 if archivo:
 
-    texto = archivo.read().decode(
-        "utf-8",
-        errors="ignore"
-    )
+    texto = archivo.read().decode("utf-8", errors="ignore")
 
     patron = r"\[(\d{1,2}[-/]\d{1,2}[-/]\d{2}),\s([^]]+?)\]\s(.+?):\s(.*?)(?=\n\[\d{1,2}[-/]\d{1,2}[-/]\d{2},|\Z)"
 
-    matches = re.findall(
-        patron,
-        texto,
-        flags=re.DOTALL
-    )
+    matches = re.findall(patron, texto, flags=re.DOTALL)
 
     filas = []
 
@@ -49,256 +37,189 @@ if archivo:
 
         mensaje = mensaje.strip()
 
-        # SOLO ROBOT 80
         if "Robot 80" not in usuario:
             continue
+
+        aplicacion = extraer_campo(mensaje, ["Aplicacion", "Aplicación"])
+        paso = extraer_campo(mensaje, "Paso")
+        operadores = extraer_campo(mensaje, "Operadores")
+        detalle = extraer_campo(mensaje, "Detalle")
+        mensaje_error = extraer_campo(mensaje, "Mensaje")
 
         filas.append({
             "fecha": fecha,
             "hora": hora,
             "usuario": usuario,
-            "aplicacion": extraer_campo(
-                mensaje,
-                "Aplicacion"
-            ),
-            "paso": extraer_campo(
-                mensaje,
-                "Paso"
-            ),
-            "operadores": extraer_campo(
-                mensaje,
-                "Operadores"
-            ),
-            "detalle": extraer_campo(
-                mensaje,
-                "Detalle"
-            ),
-            "mensaje_error": extraer_campo(
-                mensaje,
-                "Mensaje"
-            ),
-            "mensaje_original": mensaje,
-            "robot": True
+            "aplicacion": aplicacion,
+            "paso": paso,
+            "operadores": operadores,
+            "detalle": detalle,
+            "mensaje_error": mensaje_error,
+            "mensaje_original": mensaje
         })
 
-    df = pd.DataFrame(filas)
+    df_robot = pd.DataFrame(filas)
 
-    if len(df) == 0:
-        st.warning(
-            "No se encontraron mensajes de Robot 80"
-        )
+    if len(df_robot) == 0:
+        st.warning("No se encontraron mensajes de Robot 80.")
         st.stop()
 
-    df["fecha_dt"] = pd.to_datetime(
-        df["fecha"],
-        format="%d-%m-%y",
-        errors="coerce"
-    )
+    # Solo alertas con estructura real
+    df = df_robot[
+        (df_robot["aplicacion"] != "") &
+        (df_robot["paso"] != "") &
+        (df_robot["operadores"] != "")
+    ].copy()
+
+    mensajes_descartados = len(df_robot) - len(df)
+
+    if len(df) == 0:
+        st.error("Se encontraron mensajes de Robot 80, pero ninguno con Aplicacion/Paso/Operadores.")
+        st.dataframe(df_robot, use_container_width=True)
+        st.stop()
+
+    df["fecha_dt"] = pd.to_datetime(df["fecha"], format="%d-%m-%y", errors="coerce")
+
+    # Operadores separados
+    df_ops = df.copy()
+    df_ops["operador_individual"] = df_ops["operadores"].str.split(",")
+    df_ops = df_ops.explode("operador_individual")
+    df_ops["operador_individual"] = df_ops["operador_individual"].str.strip()
 
     st.subheader("Filtros")
 
-    col1,col2,col3,col4 = st.columns(4)
-
-    fecha_min = df["fecha_dt"].min()
-    fecha_max = df["fecha_dt"].max()
+    col1, col2, col3, col4 = st.columns(4)
 
     rango = col1.date_input(
         "Rango de fechas",
-        value=(fecha_min,fecha_max)
+        value=(df["fecha_dt"].min(), df["fecha_dt"].max())
     )
 
-    aplicaciones = sorted(
-        df["aplicacion"]
-        .dropna()
-        .unique()
-    )
+    apps = sorted(df["aplicacion"].dropna().unique())
+    pasos = sorted(df["paso"].dropna().unique())
+    operadores_ind = sorted(df_ops["operador_individual"].dropna().unique())
 
-    pasos = sorted(
-        df["paso"]
-        .dropna()
-        .unique()
-    )
-
-    operadores = sorted(
-        df["operadores"]
-        .dropna()
-        .unique()
-    )
-
-    app_sel = col2.multiselect(
-        "Aplicación",
-        aplicaciones
-    )
-
-    paso_sel = col3.multiselect(
-        "Paso",
-        pasos
-    )
-
-    operador_sel = col4.multiselect(
-        "Operadores",
-        operadores
-    )
+    app_sel = col2.multiselect("Aplicación", apps)
+    paso_sel = col3.multiselect("Paso", pasos)
+    operador_sel = col4.multiselect("Operador", operadores_ind)
 
     df_filtrado = df.copy()
 
-    if len(rango)==2:
-
-        inicio = pd.to_datetime(
-            rango[0]
-        )
-
-        fin = pd.to_datetime(
-            rango[1]
-        )
+    if len(rango) == 2:
+        inicio = pd.to_datetime(rango[0])
+        fin = pd.to_datetime(rango[1])
 
         df_filtrado = df_filtrado[
-            (df_filtrado["fecha_dt"]>=inicio)
-            &
-            (df_filtrado["fecha_dt"]<=fin)
+            (df_filtrado["fecha_dt"] >= inicio) &
+            (df_filtrado["fecha_dt"] <= fin)
         ]
 
     if app_sel:
-
-        df_filtrado = df_filtrado[
-            df_filtrado["aplicacion"]
-            .isin(app_sel)
-        ]
+        df_filtrado = df_filtrado[df_filtrado["aplicacion"].isin(app_sel)]
 
     if paso_sel:
-
-        df_filtrado = df_filtrado[
-            df_filtrado["paso"]
-            .isin(paso_sel)
-        ]
+        df_filtrado = df_filtrado[df_filtrado["paso"].isin(paso_sel)]
 
     if operador_sel:
-
+        patron_operador = "|".join(operador_sel)
         df_filtrado = df_filtrado[
-            df_filtrado["operadores"]
-            .isin(operador_sel)
+            df_filtrado["operadores"].str.contains(patron_operador, na=False, regex=True)
         ]
 
-    c1,c2,c3,c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
 
-    c1.metric(
-        "Alertas",
-        len(df_filtrado)
-    )
+    c1.metric("Alertas válidas", len(df_filtrado))
+    c2.metric("Apps afectadas", df_filtrado["aplicacion"].nunique())
+    c3.metric("Pasos afectados", df_filtrado["paso"].nunique())
+    c4.metric("Mensajes Robot 80", len(df_robot))
+    c5.metric("Descartados sin estructura", mensajes_descartados)
 
-    c2.metric(
-        "Apps afectadas",
-        df_filtrado["aplicacion"]
-        .nunique()
-    )
-
-    c3.metric(
-        "Pasos afectados",
-        df_filtrado["paso"]
-        .nunique()
-    )
-
-    c4.metric(
-        "Operadores",
-        df_filtrado["operadores"]
-        .nunique()
-    )
-
-    st.subheader(
-        "Alertas por día"
-    )
+    st.subheader("Alertas por día")
 
     diario = (
         df_filtrado
         .groupby("fecha_dt")
         .size()
-        .reset_index(
-            name="cantidad"
-        )
+        .reset_index(name="cantidad")
+        .sort_values("fecha_dt")
     )
 
-    fig = px.line(
-        diario,
-        x="fecha_dt",
-        y="cantidad",
-        markers=True
-    )
+    if len(diario) > 0:
+        fig = px.line(diario, x="fecha_dt", y="cantidad", markers=True)
+        st.plotly_chart(fig, use_container_width=True)
 
-    st.plotly_chart(
-        fig,
-        use_container_width=True
-    )
-
-    g1,g2 = st.columns(2)
+    g1, g2 = st.columns(2)
 
     with g1:
-
-        st.subheader(
-            "Top aplicaciones"
-        )
+        st.subheader("Top aplicaciones")
 
         top_apps = (
             df_filtrado
             .groupby("aplicacion")
             .size()
-            .reset_index(
-                name="cantidad"
-            )
-            .sort_values(
-                "cantidad"
-            )
+            .reset_index(name="cantidad")
+            .sort_values("cantidad", ascending=True)
         )
 
-        fig_apps = px.bar(
-            top_apps,
-            x="cantidad",
-            y="aplicacion",
-            orientation="h",
-            text="cantidad"
-        )
-
-        st.plotly_chart(
-            fig_apps,
-            use_container_width=True
-        )
+        if len(top_apps) > 0:
+            fig_apps = px.bar(
+                top_apps,
+                x="cantidad",
+                y="aplicacion",
+                orientation="h",
+                text="cantidad"
+            )
+            st.plotly_chart(fig_apps, use_container_width=True)
 
     with g2:
-
-        st.subheader(
-            "Top pasos"
-        )
+        st.subheader("Top pasos")
 
         top_pasos = (
             df_filtrado
             .groupby("paso")
             .size()
-            .reset_index(
-                name="cantidad"
-            )
-            .sort_values(
-                "cantidad"
-            )
+            .reset_index(name="cantidad")
+            .sort_values("cantidad", ascending=True)
         )
 
-        fig_pasos = px.bar(
-            top_pasos,
+        if len(top_pasos) > 0:
+            fig_pasos = px.bar(
+                top_pasos,
+                x="cantidad",
+                y="paso",
+                orientation="h",
+                text="cantidad"
+            )
+            st.plotly_chart(fig_pasos, use_container_width=True)
+
+    st.subheader("Operadores afectados")
+
+    df_ops_filtrado = df_filtrado.copy()
+    df_ops_filtrado["operador_individual"] = df_ops_filtrado["operadores"].str.split(",")
+    df_ops_filtrado = df_ops_filtrado.explode("operador_individual")
+    df_ops_filtrado["operador_individual"] = df_ops_filtrado["operador_individual"].str.strip()
+
+    top_ops = (
+        df_ops_filtrado
+        .groupby("operador_individual")
+        .size()
+        .reset_index(name="cantidad")
+        .sort_values("cantidad", ascending=True)
+    )
+
+    if len(top_ops) > 0:
+        fig_ops = px.bar(
+            top_ops,
             x="cantidad",
-            y="paso",
+            y="operador_individual",
             orientation="h",
             text="cantidad"
         )
+        st.plotly_chart(fig_ops, use_container_width=True)
 
-        st.plotly_chart(
-            fig_pasos,
-            use_container_width=True
-        )
-
-    st.subheader(
-        "Tabla filtrada"
-    )
+    st.subheader("Tabla filtrada")
 
     columnas = [
-
         "fecha",
         "hora",
         "aplicacion",
@@ -306,7 +227,6 @@ if archivo:
         "operadores",
         "mensaje_error",
         "detalle"
-
     ]
 
     st.dataframe(
@@ -315,11 +235,7 @@ if archivo:
         hide_index=True
     )
 
-    csv = (
-        df_filtrado[columnas]
-        .to_csv(index=False)
-        .encode("utf-8")
-    )
+    csv = df_filtrado[columnas].to_csv(index=False).encode("utf-8")
 
     st.download_button(
         "Descargar CSV",
@@ -329,7 +245,4 @@ if archivo:
     )
 
 else:
-
-    st.info(
-        "Sube un TXT"
-    )
+    st.info("Sube un TXT")
