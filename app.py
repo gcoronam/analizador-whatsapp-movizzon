@@ -3,17 +3,19 @@ import pandas as pd
 import re
 import plotly.express as px
 
-st.set_page_config(
-    page_title="Analizador WhatsApp Movizzon",
-    layout="wide"
-)
+st.set_page_config(page_title="Analizador WhatsApp Movizzon", layout="wide")
 
 st.title("Analizador de TXT WhatsApp - Movizzon")
 
-archivo = st.file_uploader(
-    "Selecciona archivo TXT",
-    type=["txt"]
-)
+archivo = st.file_uploader("Selecciona archivo TXT", type=["txt"])
+
+
+def limpiar_texto(x):
+    if not isinstance(x, str):
+        return ""
+    x = x.replace("\u200e", "").replace("\u200f", "").replace("\xa0", " ")
+    x = re.sub(r"\s+", " ", x)
+    return x.strip()
 
 
 def extraer_campo(texto, campos):
@@ -21,67 +23,44 @@ def extraer_campo(texto, campos):
         campos = [campos]
 
     for campo in campos:
-        patron = rf"\*?{campo}\*?:\s*(.*)"
-        m = re.search(
-            patron,
-            texto,
-            flags=re.IGNORECASE
-        )
+        patron = rf"\*?\s*{campo}\s*:?\s*\*?\s*(.+)"
+        m = re.search(patron, texto, flags=re.IGNORECASE)
         if m:
-            return m.group(1).strip()
+            return m.group(1).strip().lstrip("*").strip()
 
     return ""
 
 
-if archivo:
-
-    texto = archivo.read().decode(
-        "utf-8",
-        errors="ignore"
+def parsear_whatsapp(texto):
+    inicio_msg = re.compile(
+        r"[\u200e\u200f]?\[(\d{1,2}[-/]\d{1,2}[-/]\d{2}),\s([^\]]+?)\]\s([^:\n]+?):",
+        flags=re.MULTILINE
     )
 
-    patron = r"\[(\d{1,2}[-/]\d{1,2}[-/]\d{2}),\s([^]]+?)\]\s(.+?):\s(.*?)(?=\n\[\d{1,2}[-/]\d{1,2}[-/]\d{2},|\Z)"
-
-    matches = re.findall(
-        patron,
-        texto,
-        flags=re.DOTALL
-    )
-
+    matches = list(inicio_msg.finditer(texto))
     filas = []
 
-    for fecha, hora, usuario, mensaje in matches:
+    for i, m in enumerate(matches):
+        fecha = limpiar_texto(m.group(1))
+        hora = limpiar_texto(m.group(2))
+        usuario = limpiar_texto(m.group(3))
 
-        mensaje = mensaje.strip()
+        inicio_contenido = m.end()
+        fin_contenido = matches[i + 1].start() if i + 1 < len(matches) else len(texto)
 
-        # Considerar Robot 80 aunque venga como usuario o dentro del mensaje
-        if "Robot 80" not in usuario and "Robot 80" not in mensaje:
+        mensaje = limpiar_texto(texto[inicio_contenido:fin_contenido])
+
+        usuario_norm = limpiar_texto(usuario).lower().replace("~", "").strip()
+
+        # Solo mensajes donde el emisor real es Robot 80
+        if "robot 80" not in usuario_norm:
             continue
 
-        aplicacion = extraer_campo(
-            mensaje,
-            ["Aplicacion", "Aplicación"]
-        )
-
-        paso = extraer_campo(
-            mensaje,
-            "Paso"
-        )
-
-        operadores = extraer_campo(
-            mensaje,
-            "Operadores"
-        )
-
-        detalle = extraer_campo(
-            mensaje,
-            "Detalle"
-        )
-
-        mensaje_error = extraer_campo(
-            mensaje,
-            "Mensaje"
-        )
+        aplicacion = extraer_campo(mensaje, ["Aplicacion", "Aplicación"])
+        paso = extraer_campo(mensaje, "Paso")
+        operadores = extraer_campo(mensaje, "Operadores")
+        detalle = extraer_campo(mensaje, "Detalle")
+        mensaje_error = extraer_campo(mensaje, "Mensaje")
 
         filas.append({
             "fecha": fecha,
@@ -95,34 +74,30 @@ if archivo:
             "mensaje_original": mensaje
         })
 
-    df_robot = pd.DataFrame(filas)
+    return pd.DataFrame(filas)
+
+
+if archivo:
+    texto = archivo.read().decode("utf-8", errors="ignore")
+
+    df_robot = parsear_whatsapp(texto)
 
     if len(df_robot) == 0:
-        st.warning("No se encontraron mensajes relacionados a Robot 80.")
+        st.warning("No se encontraron mensajes cuyo emisor real sea Robot 80.")
         st.stop()
 
-    # Aceptar alertas que tengan al menos un campo útil
     df = df_robot[
         (df_robot["aplicacion"] != "") |
         (df_robot["paso"] != "") |
         (df_robot["operadores"] != "")
     ].copy()
 
-    mensajes_descartados = len(df_robot) - len(df)
-
     if len(df) == 0:
-        st.error("Se encontraron mensajes de Robot 80, pero ninguno con campos útiles.")
-        st.dataframe(
-            df_robot,
-            use_container_width=True
-        )
+        st.error("Se encontraron mensajes de Robot 80, pero ninguno tiene Aplicacion/Paso/Operadores.")
+        st.dataframe(df_robot, use_container_width=True)
         st.stop()
 
-    df["fecha_dt"] = pd.to_datetime(
-        df["fecha"],
-        format="%d-%m-%y",
-        errors="coerce"
-    )
+    df["fecha_dt"] = pd.to_datetime(df["fecha"], format="%d-%m-%y", errors="coerce")
 
     st.subheader("Filtros")
 
@@ -130,47 +105,25 @@ if archivo:
 
     rango = col1.date_input(
         "Rango de fechas",
-        value=(
-            df["fecha_dt"].min(),
-            df["fecha_dt"].max()
-        )
+        value=(df["fecha_dt"].min(), df["fecha_dt"].max())
     )
 
-    apps = sorted([
-        x for x in df["aplicacion"].dropna().unique()
-        if x != ""
-    ])
+    apps = sorted([x for x in df["aplicacion"].dropna().unique() if x != ""])
+    pasos = sorted([x for x in df["paso"].dropna().unique() if x != ""])
 
-    pasos = sorted([
-        x for x in df["paso"].dropna().unique()
-        if x != ""
-    ])
-
-    # Operadores individuales para filtro
     df_ops_base = df.copy()
     df_ops_base["operador_individual"] = df_ops_base["operadores"].str.split(",")
     df_ops_base = df_ops_base.explode("operador_individual")
     df_ops_base["operador_individual"] = df_ops_base["operador_individual"].str.strip()
 
-    operadores_ind = sorted([
+    operadores = sorted([
         x for x in df_ops_base["operador_individual"].dropna().unique()
         if x != ""
     ])
 
-    app_sel = col2.multiselect(
-        "Aplicación",
-        apps
-    )
-
-    paso_sel = col3.multiselect(
-        "Paso",
-        pasos
-    )
-
-    operador_sel = col4.multiselect(
-        "Operador",
-        operadores_ind
-    )
+    app_sel = col2.multiselect("Aplicación", apps)
+    paso_sel = col3.multiselect("Paso", pasos)
+    operador_sel = col4.multiselect("Operador", operadores)
 
     df_filtrado = df.copy()
 
@@ -184,21 +137,13 @@ if archivo:
         ]
 
     if app_sel:
-        df_filtrado = df_filtrado[
-            df_filtrado["aplicacion"].isin(app_sel)
-        ]
+        df_filtrado = df_filtrado[df_filtrado["aplicacion"].isin(app_sel)]
 
     if paso_sel:
-        df_filtrado = df_filtrado[
-            df_filtrado["paso"].isin(paso_sel)
-        ]
+        df_filtrado = df_filtrado[df_filtrado["paso"].isin(paso_sel)]
 
     if operador_sel:
-        patron_operador = "|".join([
-            re.escape(op)
-            for op in operador_sel
-        ])
-
+        patron_operador = "|".join([re.escape(op) for op in operador_sel])
         df_filtrado = df_filtrado[
             df_filtrado["operadores"].str.contains(
                 patron_operador,
@@ -207,32 +152,12 @@ if archivo:
             )
         ]
 
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4 = st.columns(4)
 
-    c1.metric(
-        "Alertas",
-        len(df_filtrado)
-    )
-
-    c2.metric(
-        "Apps afectadas",
-        df_filtrado["aplicacion"].nunique()
-    )
-
-    c3.metric(
-        "Pasos afectados",
-        df_filtrado["paso"].nunique()
-    )
-
-    c4.metric(
-        "Mensajes Robot 80",
-        len(df_robot)
-    )
-
-    c5.metric(
-        "Descartados",
-        mensajes_descartados
-    )
+    c1.metric("Alertas Robot 80", len(df_filtrado))
+    c2.metric("Apps afectadas", df_filtrado["aplicacion"].nunique())
+    c3.metric("Pasos afectados", df_filtrado["paso"].nunique())
+    c4.metric("Mensajes Robot 80 detectados", len(df_robot))
 
     st.subheader("Alertas por día")
 
@@ -245,22 +170,15 @@ if archivo:
     )
 
     if len(diario) > 0:
-        fig = px.line(
+        fig_dia = px.line(
             diario,
             x="fecha_dt",
             y="cantidad",
             markers=True,
             text="cantidad"
         )
-
-        fig.update_traces(
-            textposition="top center"
-        )
-
-        st.plotly_chart(
-            fig,
-            use_container_width=True
-        )
+        fig_dia.update_traces(textposition="top center")
+        st.plotly_chart(fig_dia, use_container_width=True)
 
     g1, g2 = st.columns(2)
 
@@ -283,11 +201,7 @@ if archivo:
                 orientation="h",
                 text="cantidad"
             )
-
-            st.plotly_chart(
-                fig_apps,
-                use_container_width=True
-            )
+            st.plotly_chart(fig_apps, use_container_width=True)
 
     with g2:
         st.subheader("Top pasos")
@@ -308,11 +222,7 @@ if archivo:
                 orientation="h",
                 text="cantidad"
             )
-
-            st.plotly_chart(
-                fig_pasos,
-                use_container_width=True
-            )
+            st.plotly_chart(fig_pasos, use_container_width=True)
 
     st.subheader("Operadores afectados")
 
@@ -337,11 +247,7 @@ if archivo:
             orientation="h",
             text="cantidad"
         )
-
-        st.plotly_chart(
-            fig_ops,
-            use_container_width=True
-        )
+        st.plotly_chart(fig_ops, use_container_width=True)
 
     st.subheader("Tabla filtrada")
 
@@ -362,11 +268,7 @@ if archivo:
         hide_index=True
     )
 
-    csv = (
-        df_filtrado[columnas]
-        .to_csv(index=False)
-        .encode("utf-8")
-    )
+    csv = df_filtrado[columnas].to_csv(index=False).encode("utf-8")
 
     st.download_button(
         "Descargar CSV",
@@ -376,5 +278,4 @@ if archivo:
     )
 
 else:
-
     st.info("Sube un TXT")
