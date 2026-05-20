@@ -28,8 +28,25 @@ def extraer_campo(texto, campos):
 
     texto = texto.replace("\n", " ")
 
+    campos_posibles = [
+        "Aplicacion",
+        "Aplicación",
+        "Canal",
+        "Paso",
+        "Operadores",
+        "Operadores afectados",
+        "Detalle",
+        "Mensaje"
+    ]
+
     for campo in campos:
-        patron = rf"\*?\s*{campo}\s*:?\s*\*?\s*(.*?)(?=\s\*?\s*(Aplicacion|Aplicación|Paso|Operadores|Detalle|Mensaje)\s*:?\s*\*?|$)"
+        patron = (
+            rf"\*?\s*{re.escape(campo)}\s*:?\s*\*?\s*"
+            rf"(.*?)"
+            rf"(?=\s\*?\s*("
+            + "|".join([re.escape(c) for c in campos_posibles])
+            + rf")\s*:?\s*\*?|$)"
+        )
 
         m = re.search(
             patron,
@@ -70,11 +87,30 @@ def parsear_whatsapp(texto):
         if "robot 80" not in usuario_norm:
             continue
 
-        aplicacion = extraer_campo(mensaje, ["Aplicacion", "Aplicación"])
-        paso = extraer_campo(mensaje, "Paso")
-        operadores = extraer_campo(mensaje, "Operadores")
-        detalle = extraer_campo(mensaje, "Detalle")
-        mensaje_error = extraer_campo(mensaje, "Mensaje")
+        aplicacion = extraer_campo(
+            mensaje,
+            ["Aplicacion", "Aplicación", "Canal"]
+        )
+
+        paso = extraer_campo(
+            mensaje,
+            "Paso"
+        )
+
+        operadores = extraer_campo(
+            mensaje,
+            ["Operadores afectados", "Operadores"]
+        )
+
+        detalle = extraer_campo(
+            mensaje,
+            "Detalle"
+        )
+
+        mensaje_error = extraer_campo(
+            mensaje,
+            "Mensaje"
+        )
 
         filas.append({
             "fecha": fecha,
@@ -107,7 +143,7 @@ if archivo:
     ].copy()
 
     if len(df) == 0:
-        st.error("Se encontraron mensajes de Robot 80, pero ninguno tiene Aplicacion/Paso/Operadores.")
+        st.error("Se encontraron mensajes de Robot 80, pero ninguno tiene campos reconocibles.")
         st.dataframe(df_robot, use_container_width=True)
         st.stop()
 
@@ -146,7 +182,7 @@ if archivo:
         if x != ""
     ])
 
-    app_sel = col2.multiselect("Aplicación", apps)
+    app_sel = col2.multiselect("Aplicación / Canal", apps)
     paso_sel = col3.multiselect("Paso", pasos)
     operador_sel = col4.multiselect("Operador", operadores)
 
@@ -181,7 +217,7 @@ if archivo:
     c1, c2, c3, c4 = st.columns(4)
 
     c1.metric("Alertas Robot 80", len(df_filtrado))
-    c2.metric("Apps afectadas", df_filtrado["aplicacion"].nunique())
+    c2.metric("Apps / Canales afectados", df_filtrado["aplicacion"].nunique())
     c3.metric("Pasos afectados", df_filtrado["paso"].nunique())
     c4.metric("Mensajes Robot 80 detectados", len(df_robot))
 
@@ -211,7 +247,7 @@ if archivo:
     g1, g2 = st.columns(2)
 
     with g1:
-        st.subheader("Top aplicaciones")
+        st.subheader("Top aplicaciones / canales")
 
         top_apps = (
             df_filtrado[df_filtrado["aplicacion"] != ""]
