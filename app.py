@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import re
+import plotly.express as px
 
 st.set_page_config(
     page_title="Analizador WhatsApp Movizzon",
@@ -142,8 +143,17 @@ if archivo:
     )
 
     if len(alertas_dia) > 0:
-        st.line_chart(
-            alertas_dia.set_index("fecha_dt")
+        fig_dia = px.line(
+            alertas_dia,
+            x="fecha_dt",
+            y="alertas",
+            markers=True,
+            title="Cantidad de alertas por fecha"
+        )
+
+        st.plotly_chart(
+            fig_dia,
+            use_container_width=True
         )
 
     colg1, colg2 = st.columns(2)
@@ -156,13 +166,23 @@ if archivo:
             .groupby("aplicacion")
             .size()
             .reset_index(name="alertas")
-            .sort_values("alertas", ascending=False)
-            .head(10)
+            .sort_values("alertas", ascending=True)
+            .tail(10)
         )
 
         if len(top_apps) > 0:
-            st.bar_chart(
-                top_apps.set_index("aplicacion")
+            fig_apps = px.bar(
+                top_apps,
+                x="alertas",
+                y="aplicacion",
+                orientation="h",
+                text="alertas",
+                title="Aplicaciones con más alertas"
+            )
+
+            st.plotly_chart(
+                fig_apps,
+                use_container_width=True
             )
 
     with colg2:
@@ -173,13 +193,23 @@ if archivo:
             .groupby("paso")
             .size()
             .reset_index(name="alertas")
-            .sort_values("alertas", ascending=False)
-            .head(10)
+            .sort_values("alertas", ascending=True)
+            .tail(10)
         )
 
         if len(top_pasos) > 0:
-            st.bar_chart(
-                top_pasos.set_index("paso")
+            fig_pasos = px.bar(
+                top_pasos,
+                x="alertas",
+                y="paso",
+                orientation="h",
+                text="alertas",
+                title="Pasos con más alertas"
+            )
+
+            st.plotly_chart(
+                fig_pasos,
+                use_container_width=True
             )
 
     st.subheader("Matriz fecha vs aplicación")
@@ -210,12 +240,22 @@ if archivo:
         .groupby("operador_individual")
         .size()
         .reset_index(name="alertas")
-        .sort_values("alertas", ascending=False)
+        .sort_values("alertas", ascending=True)
     )
 
     if len(top_ops) > 0:
-        st.bar_chart(
-            top_ops.set_index("operador_individual")
+        fig_ops = px.bar(
+            top_ops,
+            x="alertas",
+            y="operador_individual",
+            orientation="h",
+            text="alertas",
+            title="Operadores con más alertas"
+        )
+
+        st.plotly_chart(
+            fig_ops,
+            use_container_width=True
         )
 
     st.subheader("Tabla filtrada")
