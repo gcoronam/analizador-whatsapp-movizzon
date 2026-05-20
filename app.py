@@ -13,8 +13,12 @@ archivo = st.file_uploader("Selecciona archivo TXT", type=["txt"])
 def limpiar_texto(x):
     if not isinstance(x, str):
         return ""
-    x = x.replace("\u200e", "").replace("\u200f", "").replace("\xa0", " ")
+
+    x = x.replace("\u200e", "")
+    x = x.replace("\u200f", "")
+    x = x.replace("\xa0", " ")
     x = re.sub(r"\s+", " ", x)
+
     return x.strip()
 
 
@@ -22,15 +26,26 @@ def extraer_campo(texto, campos):
     if isinstance(campos, str):
         campos = [campos]
 
+    texto = texto.replace("\n", " ")
+
     for campo in campos:
-        patron = rf"\*?\s*{campo}\s*:?\s*\*?\s*(.+)"
-        m = re.search(patron, texto, flags=re.IGNORECASE)
+        patron = rf"\*?\s*{campo}\s*:?\s*\*?\s*(.*?)(?=\s\*?\s*(Aplicacion|Aplicación|Paso|Operadores|Detalle|Mensaje)\s*:?\s*\*?|$)"
+
+        m = re.search(
+            patron,
+            texto,
+            flags=re.IGNORECASE
+        )
+
         if m:
-            return m.group(1).strip().lstrip("*").strip()
+            valor = m.group(1).strip()
+            valor = valor.replace("*", "").strip()
+            return valor
 
     return ""
 
 
+@st.cache_data
 def parsear_whatsapp(texto):
     inicio_msg = re.compile(
         r"[\u200e\u200f]?\[(\d{1,2}[-/]\d{1,2}[-/]\d{2}),\s([^\]]+?)\]\s([^:\n]+?):",
@@ -50,9 +65,8 @@ def parsear_whatsapp(texto):
 
         mensaje = limpiar_texto(texto[inicio_contenido:fin_contenido])
 
-        usuario_norm = limpiar_texto(usuario).lower().replace("~", "").strip()
+        usuario_norm = usuario.lower().replace("~", "").strip()
 
-        # Solo mensajes donde el emisor real es Robot 80
         if "robot 80" not in usuario_norm:
             continue
 
@@ -97,7 +111,11 @@ if archivo:
         st.dataframe(df_robot, use_container_width=True)
         st.stop()
 
-    df["fecha_dt"] = pd.to_datetime(df["fecha"], format="%d-%m-%y", errors="coerce")
+    df["fecha_dt"] = pd.to_datetime(
+        df["fecha"],
+        format="%d-%m-%y",
+        errors="coerce"
+    )
 
     st.subheader("Filtros")
 
@@ -108,8 +126,15 @@ if archivo:
         value=(df["fecha_dt"].min(), df["fecha_dt"].max())
     )
 
-    apps = sorted([x for x in df["aplicacion"].dropna().unique() if x != ""])
-    pasos = sorted([x for x in df["paso"].dropna().unique() if x != ""])
+    apps = sorted([
+        x for x in df["aplicacion"].dropna().unique()
+        if x != ""
+    ])
+
+    pasos = sorted([
+        x for x in df["paso"].dropna().unique()
+        if x != ""
+    ])
 
     df_ops_base = df.copy()
     df_ops_base["operador_individual"] = df_ops_base["operadores"].str.split(",")
@@ -144,6 +169,7 @@ if archivo:
 
     if operador_sel:
         patron_operador = "|".join([re.escape(op) for op in operador_sel])
+
         df_filtrado = df_filtrado[
             df_filtrado["operadores"].str.contains(
                 patron_operador,
@@ -177,7 +203,9 @@ if archivo:
             markers=True,
             text="cantidad"
         )
+
         fig_dia.update_traces(textposition="top center")
+
         st.plotly_chart(fig_dia, use_container_width=True)
 
     g1, g2 = st.columns(2)
@@ -191,6 +219,7 @@ if archivo:
             .size()
             .reset_index(name="cantidad")
             .sort_values("cantidad", ascending=True)
+            .tail(10)
         )
 
         if len(top_apps) > 0:
@@ -201,6 +230,7 @@ if archivo:
                 orientation="h",
                 text="cantidad"
             )
+
             st.plotly_chart(fig_apps, use_container_width=True)
 
     with g2:
@@ -212,6 +242,7 @@ if archivo:
             .size()
             .reset_index(name="cantidad")
             .sort_values("cantidad", ascending=True)
+            .tail(10)
         )
 
         if len(top_pasos) > 0:
@@ -222,6 +253,7 @@ if archivo:
                 orientation="h",
                 text="cantidad"
             )
+
             st.plotly_chart(fig_pasos, use_container_width=True)
 
     st.subheader("Operadores afectados")
@@ -247,6 +279,7 @@ if archivo:
             orientation="h",
             text="cantidad"
         )
+
         st.plotly_chart(fig_ops, use_container_width=True)
 
     st.subheader("Tabla filtrada")
