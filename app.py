@@ -3,11 +3,17 @@ import pandas as pd
 import re
 import plotly.express as px
 
-st.set_page_config(page_title="Analizador WhatsApp Movizzon", layout="wide")
+st.set_page_config(
+    page_title="Analizador WhatsApp Movizzon",
+    layout="wide"
+)
 
 st.title("Analizador de TXT WhatsApp - Movizzon")
 
-archivo = st.file_uploader("Selecciona archivo TXT", type=["txt"])
+archivo = st.file_uploader(
+    "Selecciona archivo TXT",
+    type=["txt"]
+)
 
 
 def limpiar_texto(x):
@@ -87,6 +93,10 @@ def parsear_whatsapp(texto):
         if "robot 80" not in usuario_norm:
             continue
 
+        # Excluir mensajes de espera del bot
+        if "esperando el mensaje" in mensaje.lower():
+            continue
+
         aplicacion = extraer_campo(
             mensaje,
             ["Aplicacion", "Aplicación", "Canal"]
@@ -128,7 +138,10 @@ def parsear_whatsapp(texto):
 
 
 if archivo:
-    texto = archivo.read().decode("utf-8", errors="ignore")
+    texto = archivo.read().decode(
+        "utf-8",
+        errors="ignore"
+    )
 
     df_robot = parsear_whatsapp(texto)
 
@@ -144,13 +157,20 @@ if archivo:
 
     if len(df) == 0:
         st.error("Se encontraron mensajes de Robot 80, pero ninguno tiene campos reconocibles.")
-        st.dataframe(df_robot, use_container_width=True)
+        st.dataframe(
+            df_robot,
+            use_container_width=True
+        )
         st.stop()
 
     df["fecha_dt"] = pd.to_datetime(
         df["fecha"],
         format="%d-%m-%y",
         errors="coerce"
+    )
+
+    df = df.dropna(
+        subset=["fecha_dt"]
     )
 
     st.subheader("Filtros")
@@ -182,9 +202,20 @@ if archivo:
         if x != ""
     ])
 
-    app_sel = col2.multiselect("Aplicación / Canal", apps)
-    paso_sel = col3.multiselect("Paso", pasos)
-    operador_sel = col4.multiselect("Operador", operadores)
+    app_sel = col2.multiselect(
+        "Aplicación / Canal",
+        apps
+    )
+
+    paso_sel = col3.multiselect(
+        "Paso",
+        pasos
+    )
+
+    operador_sel = col4.multiselect(
+        "Operador",
+        operadores
+    )
 
     df_filtrado = df.copy()
 
@@ -198,13 +229,20 @@ if archivo:
         ]
 
     if app_sel:
-        df_filtrado = df_filtrado[df_filtrado["aplicacion"].isin(app_sel)]
+        df_filtrado = df_filtrado[
+            df_filtrado["aplicacion"].isin(app_sel)
+        ]
 
     if paso_sel:
-        df_filtrado = df_filtrado[df_filtrado["paso"].isin(paso_sel)]
+        df_filtrado = df_filtrado[
+            df_filtrado["paso"].isin(paso_sel)
+        ]
 
     if operador_sel:
-        patron_operador = "|".join([re.escape(op) for op in operador_sel])
+        patron_operador = "|".join([
+            re.escape(op)
+            for op in operador_sel
+        ])
 
         df_filtrado = df_filtrado[
             df_filtrado["operadores"].str.contains(
@@ -216,10 +254,29 @@ if archivo:
 
     c1, c2, c3, c4 = st.columns(4)
 
-    c1.metric("Alertas Robot 80", len(df_filtrado))
-    c2.metric("Apps / Canales afectados", df_filtrado["aplicacion"].nunique())
-    c3.metric("Pasos afectados", df_filtrado["paso"].nunique())
-    c4.metric("Mensajes Robot 80 detectados", len(df_robot))
+    c1.metric(
+        "Alertas Robot 80",
+        len(df_filtrado)
+    )
+
+    c2.metric(
+        "Apps / Canales afectados",
+        df_filtrado["aplicacion"].nunique()
+    )
+
+    c3.metric(
+        "Pasos afectados",
+        df_filtrado["paso"].nunique()
+    )
+
+    c4.metric(
+        "Mensajes Robot 80 detectados",
+        len(df_robot)
+    )
+
+    # ==========================
+    # ALERTAS POR DÍA CON DETALLE
+    # ==========================
 
     st.subheader("Alertas por día")
 
@@ -231,7 +288,43 @@ if archivo:
         .sort_values("fecha_dt")
     )
 
+    detalle_dia = (
+        df_filtrado[df_filtrado["aplicacion"] != ""]
+        .groupby(["fecha_dt", "aplicacion"])
+        .size()
+        .reset_index(name="cantidad_app")
+        .sort_values(["fecha_dt", "cantidad_app"], ascending=[True, False])
+    )
+
+    def construir_detalle_aplicaciones(fecha):
+        data_fecha = detalle_dia[
+            detalle_dia["fecha_dt"] == fecha
+        ].copy()
+
+        if len(data_fecha) == 0:
+            return "Sin detalle de aplicación"
+
+        top = data_fecha.head(5)
+
+        lineas = []
+
+        for _, row in top.iterrows():
+            app = row["aplicacion"]
+            cantidad = row["cantidad_app"]
+            lineas.append(f"{app}: {cantidad}")
+
+        if len(data_fecha) > 5:
+            otros = data_fecha.iloc[5:]["cantidad_app"].sum()
+            lineas.append(f"Otros: {otros}")
+
+        return "<br>".join(lineas)
+
     if len(diario) > 0:
+
+        diario["detalle_apps"] = diario["fecha_dt"].apply(
+            construir_detalle_aplicaciones
+        )
+
         fig_dia = px.line(
             diario,
             x="fecha_dt",
@@ -240,9 +333,37 @@ if archivo:
             text="cantidad"
         )
 
-        fig_dia.update_traces(textposition="top center")
+        fig_dia.update_traces(
+            textposition="top center",
+            customdata=diario["detalle_apps"],
+            hovertemplate=(
+                "<b>Fecha:</b> %{x|%d-%m-%Y}<br>"
+                "<b>Total alertas:</b> %{y}<br><br>"
+                "<b>Distribución por aplicación/canal:</b><br>"
+                "%{customdata}"
+                "<extra></extra>"
+            )
+        )
 
-        st.plotly_chart(fig_dia, use_container_width=True)
+        fig_dia.update_layout(
+            xaxis_title="Fecha",
+            yaxis_title="Cantidad de alertas",
+            hoverlabel=dict(
+                align="left"
+            )
+        )
+
+        st.plotly_chart(
+            fig_dia,
+            use_container_width=True
+        )
+
+    else:
+        st.info("No hay datos para graficar con los filtros seleccionados.")
+
+    # ==========================
+    # TOP APLICACIONES Y PASOS
+    # ==========================
 
     g1, g2 = st.columns(2)
 
@@ -267,7 +388,17 @@ if archivo:
                 text="cantidad"
             )
 
-            st.plotly_chart(fig_apps, use_container_width=True)
+            fig_apps.update_layout(
+                xaxis_title="Cantidad de alertas",
+                yaxis_title="Aplicación / Canal"
+            )
+
+            st.plotly_chart(
+                fig_apps,
+                use_container_width=True
+            )
+        else:
+            st.info("No hay aplicaciones/canales para mostrar.")
 
     with g2:
         st.subheader("Top pasos")
@@ -290,7 +421,21 @@ if archivo:
                 text="cantidad"
             )
 
-            st.plotly_chart(fig_pasos, use_container_width=True)
+            fig_pasos.update_layout(
+                xaxis_title="Cantidad de alertas",
+                yaxis_title="Paso"
+            )
+
+            st.plotly_chart(
+                fig_pasos,
+                use_container_width=True
+            )
+        else:
+            st.info("No hay pasos para mostrar.")
+
+    # ==========================
+    # OPERADORES
+    # ==========================
 
     st.subheader("Operadores afectados")
 
@@ -316,7 +461,21 @@ if archivo:
             text="cantidad"
         )
 
-        st.plotly_chart(fig_ops, use_container_width=True)
+        fig_ops.update_layout(
+            xaxis_title="Cantidad de alertas",
+            yaxis_title="Operador"
+        )
+
+        st.plotly_chart(
+            fig_ops,
+            use_container_width=True
+        )
+    else:
+        st.info("No hay operadores para mostrar.")
+
+    # ==========================
+    # TABLA
+    # ==========================
 
     st.subheader("Tabla filtrada")
 
@@ -337,7 +496,9 @@ if archivo:
         hide_index=True
     )
 
-    csv = df_filtrado[columnas].to_csv(index=False).encode("utf-8")
+    csv = df_filtrado[columnas].to_csv(
+        index=False
+    ).encode("utf-8")
 
     st.download_button(
         "Descargar CSV",
@@ -348,3 +509,4 @@ if archivo:
 
 else:
     st.info("Sube un TXT")
+
