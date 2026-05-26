@@ -8,7 +8,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("Analizador de TXT WhatsApp - Movizzon")
+st.title("Analizador de Alertas WhatsApp")
 
 archivo = st.file_uploader(
     "Selecciona archivo TXT",
