@@ -4,7 +4,7 @@ import re
 import plotly.express as px
 
 st.set_page_config(
-    page_title="Analizador WhatsApp Movizzon",
+    page_title="Analizador de Alertas WhatsApp",
     layout="wide"
 )
 
@@ -26,6 +26,25 @@ def limpiar_texto(x):
     x = re.sub(r"\s+", " ", x)
 
     return x.strip()
+
+
+def normalizar_fecha(fecha):
+    fecha = limpiar_texto(fecha)
+
+    formatos = [
+        "%d-%m-%y",
+        "%d/%m/%y",
+        "%d/%m/%Y",
+        "%d-%m-%Y"
+    ]
+
+    for fmt in formatos:
+        try:
+            return pd.to_datetime(fecha, format=fmt)
+        except Exception:
+            pass
+
+    return pd.NaT
 
 
 def extraer_campo(texto, campos):
@@ -68,14 +87,46 @@ def extraer_campo(texto, campos):
     return ""
 
 
+def es_emisor_robot(usuario):
+    usuario_norm = limpiar_texto(usuario).lower()
+    usuario_norm = usuario_norm.replace("~", "").strip()
+
+    emisores_robot = [
+        "robot 80",
+        "+57 312 3277684",
+        "573123277684"
+    ]
+
+    return any(e in usuario_norm for e in emisores_robot)
+
+
 @st.cache_data
 def parsear_whatsapp(texto):
-    inicio_msg = re.compile(
-        r"[\u200e\u200f]?\[(\d{1,2}[-/]\d{1,2}[-/]\d{2}),\s([^\]]+?)\]\s([^:\n]+?):",
-        flags=re.MULTILINE
-    )
+    texto = texto.replace("\r\n", "\n").replace("\r", "\n")
 
-    matches = list(inicio_msg.finditer(texto))
+    patrones = [
+        # Formato con corchetes:
+        # [25-11-25, 8:20:52 p. m.] ~ Robot 80:
+        re.compile(
+            r"[\u200e\u200f]?\[(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}),\s([^\]]+?)\]\s([^:\n]+?):",
+            flags=re.MULTILINE
+        ),
+
+        # Formato sin corchetes:
+        # 1/5/2026, 10:00 a. m. - +57 312 3277684:
+        re.compile(
+            r"[\u200e\u200f]?(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}),\s(.+?)\s-\s([^:\n]+?):",
+            flags=re.MULTILINE
+        )
+    ]
+
+    matches = []
+
+    for patron in patrones:
+        encontrados = list(patron.finditer(texto))
+        if len(encontrados) > len(matches):
+            matches = encontrados
+
     filas = []
 
     for i, m in enumerate(matches):
@@ -88,9 +139,7 @@ def parsear_whatsapp(texto):
 
         mensaje = limpiar_texto(texto[inicio_contenido:fin_contenido])
 
-        usuario_norm = usuario.lower().replace("~", "").strip()
-
-        if "robot 80" not in usuario_norm:
+        if not es_emisor_robot(usuario):
             continue
 
         # Excluir mensajes de espera del bot
@@ -146,8 +195,11 @@ if archivo:
     df_robot = parsear_whatsapp(texto)
 
     if len(df_robot) == 0:
-        st.warning("No se encontraron mensajes cuyo emisor real sea Robot 80.")
+        st.warning("No se encontraron mensajes cuyo emisor sea Robot 80 o el número robot configurado.")
         st.stop()
+
+    df_robot["fecha_dt"] = df_robot["fecha"].apply(normalizar_fecha)
+    df_robot = df_robot.dropna(subset=["fecha_dt"])
 
     df = df_robot[
         (df_robot["aplicacion"] != "") |
@@ -155,23 +207,53 @@ if archivo:
         (df_robot["operadores"] != "")
     ].copy()
 
-    if len(df) == 0:
-        st.error("Se encontraron mensajes de Robot 80, pero ninguno tiene campos reconocibles.")
-        st.dataframe(
-            df_robot,
-            use_container_width=True
+    tiene_estructura = len(df) > 0
+
+    if not tiene_estructura:
+        st.warning(
+            "Se detectaron mensajes del robot, pero no contienen campos estructurados como Aplicacion, Canal, Paso, Operadores o Detalle. "
+            "Probablemente el TXT exportó las alertas como multimedia omitida."
         )
+
+        c1, c2 = st.columns(2)
+
+        c1.metric(
+            "Mensajes robot detectados",
+            len(df_robot)
+        )
+
+        c2.metric(
+            "Alertas estructuradas",
+            0
+        )
+
+        st.subheader("Mensajes detectados")
+
+        columnas_robot = [
+            "fecha",
+            "hora",
+            "usuario",
+            "mensaje_original"
+        ]
+
+        st.dataframe(
+            df_robot[columnas_robot],
+            use_container_width=True,
+            hide_index=True
+        )
+
+        csv_robot = df_robot[columnas_robot].to_csv(
+            index=False
+        ).encode("utf-8")
+
+        st.download_button(
+            "Descargar CSV mensajes robot",
+            csv_robot,
+            "mensajes_robot_detectados.csv",
+            "text/csv"
+        )
+
         st.stop()
-
-    df["fecha_dt"] = pd.to_datetime(
-        df["fecha"],
-        format="%d-%m-%y",
-        errors="coerce"
-    )
-
-    df = df.dropna(
-        subset=["fecha_dt"]
-    )
 
     st.subheader("Filtros")
 
@@ -255,7 +337,7 @@ if archivo:
     c1, c2, c3, c4 = st.columns(4)
 
     c1.metric(
-        "Alertas Robot 80",
+        "Alertas Robot",
         len(df_filtrado)
     )
 
@@ -270,13 +352,9 @@ if archivo:
     )
 
     c4.metric(
-        "Mensajes Robot 80 detectados",
+        "Mensajes robot detectados",
         len(df_robot)
     )
-
-    # ==========================
-    # ALERTAS POR DÍA CON DETALLE
-    # ==========================
 
     st.subheader("Alertas por día")
 
@@ -302,7 +380,7 @@ if archivo:
         ].copy()
 
         if len(data_fecha) == 0:
-            return "Sin detalle de aplicación"
+            return "Sin detalle de aplicación/canal"
 
         top = data_fecha.head(5)
 
@@ -360,10 +438,6 @@ if archivo:
 
     else:
         st.info("No hay datos para graficar con los filtros seleccionados.")
-
-    # ==========================
-    # TOP APLICACIONES Y PASOS
-    # ==========================
 
     g1, g2 = st.columns(2)
 
@@ -433,10 +507,6 @@ if archivo:
         else:
             st.info("No hay pasos para mostrar.")
 
-    # ==========================
-    # OPERADORES
-    # ==========================
-
     st.subheader("Operadores afectados")
 
     df_ops = df_filtrado.copy()
@@ -473,10 +543,6 @@ if archivo:
     else:
         st.info("No hay operadores para mostrar.")
 
-    # ==========================
-    # TABLA
-    # ==========================
-
     st.subheader("Tabla filtrada")
 
     columnas = [
@@ -503,10 +569,9 @@ if archivo:
     st.download_button(
         "Descargar CSV",
         csv,
-        "resultado_robot_80.csv",
+        "resultado_robot.csv",
         "text/csv"
     )
 
 else:
     st.info("Sube un TXT")
-
