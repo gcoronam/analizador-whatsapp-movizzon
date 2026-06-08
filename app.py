@@ -60,6 +60,7 @@ def extraer_campo(texto, campos):
         "Paso",
         "Operadores",
         "Operadores afectados",
+        "Dispositivos",
         "Detalle",
         "Mensaje"
     ]
@@ -158,7 +159,7 @@ def parsear_whatsapp(texto):
 
         operadores = extraer_campo(
             mensaje,
-            ["Operadores afectados", "Operadores"]
+            ["Operadores afectados", "Operadores", "Dispositivos"]
         )
 
         detalle = extraer_campo(
@@ -211,7 +212,7 @@ if archivo:
 
     if not tiene_estructura:
         st.warning(
-            "Se detectaron mensajes del robot, pero no contienen campos estructurados como Aplicacion, Canal, Paso, Operadores o Detalle. "
+            "Se detectaron mensajes del robot, pero no contienen campos estructurados como Aplicacion, Canal, Paso, Operadores, Dispositivos o Detalle. "
             "Probablemente el TXT exportó las alertas como multimedia omitida."
         )
 
@@ -295,7 +296,7 @@ if archivo:
     )
 
     operador_sel = col4.multiselect(
-        "Operador",
+        "Operador / Dispositivo",
         operadores
     )
 
@@ -507,7 +508,7 @@ if archivo:
         else:
             st.info("No hay pasos para mostrar.")
 
-    st.subheader("Operadores afectados")
+    st.subheader("Operadores / dispositivos afectados")
 
     df_ops = df_filtrado.copy()
     df_ops["operador_individual"] = df_ops["operadores"].str.split(",")
@@ -533,7 +534,7 @@ if archivo:
 
         fig_ops.update_layout(
             xaxis_title="Cantidad de alertas",
-            yaxis_title="Operador"
+            yaxis_title="Operador / Dispositivo"
         )
 
         st.plotly_chart(
@@ -541,7 +542,7 @@ if archivo:
             use_container_width=True
         )
     else:
-        st.info("No hay operadores para mostrar.")
+        st.info("No hay operadores/dispositivos para mostrar.")
 
     st.subheader("Tabla filtrada")
 
