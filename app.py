@@ -672,7 +672,7 @@ def generar_informe_pdf(df_filtrado, cliente="Cliente", fuente="Grupo de Alertas
 
         if len(tecnologia_top) > 0:
             hallazgos.append(
-                f"La tecnología con más alertas fue {tecnologia_top.index[0]}, con {tecnologia_top.iloc[0]} alertas."
+                f"La tecnología con más alertas dentro del canal {canal} fue {tecnologia_top.index[0]}, con {tecnologia_top.iloc[0]} alertas."
             )
 
         if len(paso_top) > 0:
