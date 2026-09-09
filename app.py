@@ -204,12 +204,14 @@ def parsear_whatsapp(texto):
 def detectar_tecnologia(aplicacion):
     app = limpiar_texto(aplicacion).lower()
 
+    # Orden intencional:
+    # Huawei antes que Android, porque algunos flujos pueden mencionar APP pero son Huawei.
+    if "huawei" in app:
+        return "Huawei"
     if "android" in app:
         return "Android"
     if "ios" in app:
         return "iOS"
-    if "huawei" in app:
-        return "Huawei"
     if "web" in app:
         return "Web"
 
@@ -768,6 +770,10 @@ if archivo:
         (df_robot["operadores"] != "")
     ].copy()
 
+    df["canal"] = df["aplicacion"].apply(detectar_canal)
+    df["tecnologia"] = df["aplicacion"].apply(detectar_tecnologia)
+    df["tipo_alerta"] = df["mensaje_error"].apply(detectar_tipo_alerta)
+
     tiene_estructura = len(df) > 0
 
     if not tiene_estructura:
@@ -818,7 +824,7 @@ if archivo:
 
     st.subheader("Filtros")
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
 
     rango = col1.date_input(
         "Rango de fechas",
@@ -845,6 +851,11 @@ if archivo:
         if x != ""
     ])
 
+    tecnologias = sorted([
+        x for x in df["tecnologia"].dropna().unique()
+        if x != ""
+    ])
+
     app_sel = col2.multiselect(
         "Aplicación / Canal",
         apps
@@ -858,6 +869,11 @@ if archivo:
     operador_sel = col4.multiselect(
         "Operador / Dispositivo",
         operadores
+    )
+
+    tecnologia_sel = col5.multiselect(
+        "Tecnología",
+        tecnologias
     )
 
     df_filtrado = df.copy()
@@ -895,7 +911,12 @@ if archivo:
             )
         ]
 
-    c1, c2, c3, c4 = st.columns(4)
+    if tecnologia_sel:
+        df_filtrado = df_filtrado[
+            df_filtrado["tecnologia"].isin(tecnologia_sel)
+        ]
+
+    c1, c2, c3, c4, c5 = st.columns(5)
 
     c1.metric(
         "Alertas Robot",
@@ -913,6 +934,11 @@ if archivo:
     )
 
     c4.metric(
+        "Tecnologías afectadas",
+        df_filtrado["tecnologia"].nunique()
+    )
+
+    c5.metric(
         "Mensajes robot detectados",
         len(df_robot)
     )
@@ -1104,6 +1130,37 @@ if archivo:
     else:
         st.info("No hay operadores/dispositivos para mostrar.")
 
+    st.subheader("Alertas por tecnología")
+
+    top_tecnologia = (
+        df_filtrado[df_filtrado["tecnologia"] != ""]
+        .groupby("tecnologia")
+        .size()
+        .reset_index(name="cantidad")
+        .sort_values("cantidad", ascending=True)
+    )
+
+    if len(top_tecnologia) > 0:
+        fig_tecnologia = px.bar(
+            top_tecnologia,
+            x="cantidad",
+            y="tecnologia",
+            orientation="h",
+            text="cantidad"
+        )
+
+        fig_tecnologia.update_layout(
+            xaxis_title="Cantidad de alertas",
+            yaxis_title="Tecnología"
+        )
+
+        st.plotly_chart(
+            fig_tecnologia,
+            use_container_width=True
+        )
+    else:
+        st.info("No hay tecnología para mostrar.")
+
     st.subheader("Informe PDF")
 
     col_pdf1, col_pdf2 = st.columns(2)
@@ -1141,8 +1198,11 @@ if archivo:
         "hora",
         "usuario",
         "aplicacion",
+        "canal",
+        "tecnologia",
         "paso",
         "operadores",
+        "tipo_alerta",
         "mensaje_error",
         "detalle"
     ]
